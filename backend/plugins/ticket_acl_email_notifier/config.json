@@ -1,0 +1,14 @@
+{
+  "shortname": "ticket_acl_email_notifier",
+  "is_active": true,
+  "filters": {
+    "subpaths": ["__ALL__"],
+    "resource_types": ["content"],
+    "schema_shortnames": ["__ALL__"],
+    "actions": ["update"]
+  },
+  "type": "hook",
+  "ordinal": 1,
+  "listen_time": "after"
+}
+
