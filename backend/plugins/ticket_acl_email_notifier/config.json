@@ -9,6 +9,14 @@
   },
   "type": "hook",
   "ordinal": 1,
-  "listen_time": "after"
+  "listen_time": "after",
+  "smtp_config": {
+    "host": "email-smtp.eu-central-1.amazonaws.com",
+    "port": 587,
+    "username": "AKIARXE6PAH7JZTYWPXL",
+    "password": "BPn9sC24rZG4FvnHLK6n53g5uJxpFyScuQRQSIkGDhAW",
+    "from_address": "noreply@zainmart.com",
+    "from_name": "no-reply"
+  }
 }
 

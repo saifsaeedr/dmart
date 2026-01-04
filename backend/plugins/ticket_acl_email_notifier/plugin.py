@@ -1,11 +1,97 @@
 from sys import modules as sys_modules
+import json
+from pathlib import Path
 from models.core import Content, PluginBase, Event, ActionType, Ticket, User
 from models.enums import ResourceType
 from utils.helpers import camel_case
 from utils.settings import settings
-from api.user.service import send_email
 from data_adapters.adapter import data_adapter as db
 from fastapi.logger import logger
+import aiosmtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+
+def _load_plugin_config():
+    """Load SMTP config from plugin's config.json file"""
+    config_file = Path(__file__).parent / "config.json"
+    try:
+        if config_file.exists():
+            with open(config_file, "r", encoding="utf-8") as f:
+                config = json.load(f)
+                return config.get("smtp_config", {})
+    except Exception as e:
+        logger.error(f"Failed to load plugin config: {e}")
+    return {}
+
+
+# Load plugin config once at module import
+_plugin_smtp_config = _load_plugin_config()
+
+
+async def send_email_smtp(
+    from_address: str,
+    to_address: str,
+    message: str,
+    subject: str,
+    from_name: str = ""
+) -> bool:
+    """Send email using SMTP from plugin config.json"""
+    try:
+        # Read SMTP configuration from plugin config.json only
+        mail_host = _plugin_smtp_config.get("host", "")
+        mail_port = int(_plugin_smtp_config.get("port", 587))
+        mail_username = _plugin_smtp_config.get("username", "")
+        mail_password = _plugin_smtp_config.get("password", "")
+        
+        if not mail_host:
+            logger.error("SMTP host not configured in plugin config.json")
+            return False
+        
+        # Create message
+        msg = MIMEMultipart("alternative")
+        msg["From"] = f"{from_name} <{from_address}>" if from_name else from_address
+        msg["To"] = to_address
+        msg["Subject"] = subject
+        
+        html_part = MIMEText(message, "html")
+        msg.attach(html_part)
+        
+        # Standard encryption: SSL for port 465, STARTTLS for other ports
+        use_ssl = mail_port == 465
+        
+        # Create and connect SMTP
+        smtp = aiosmtplib.SMTP(hostname=mail_host, port=mail_port, use_tls=use_ssl)
+        await smtp.connect()
+        
+        # Start TLS for non-SSL connections (port 587)
+        if not use_ssl:
+            try:
+                await smtp.starttls()
+            except Exception as e:
+                # If TLS is already active, that's fine - continue
+                if "already using tls" not in str(e).lower():
+                    raise
+        
+        # Authenticate
+        if mail_username and mail_password:
+            await smtp.login(mail_username, mail_password)
+        
+        # Send email
+        await smtp.send_message(msg)
+        
+        # Close connection (ignore quit errors)
+        try:
+            await smtp.quit()
+        except Exception:
+            pass
+        
+        logger.info(f"Sent email to {to_address} for ticket notification")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to send email to {to_address}: {e}")
+        return False
 
 
 class Plugin(PluginBase):
@@ -115,23 +201,16 @@ class Plugin(PluginBase):
                     message = f"<p>Your action is needed for request {ticket.shortname}</p>"
                     subject = "Action Required for Request"
 
-                    # Send email
-                    success = await send_email(
-                        from_address=settings.email_sender,
+                    # Send email using SMTP
+                    from_address = _plugin_smtp_config.get("from_address", settings.email_sender)
+                    from_name = _plugin_smtp_config.get("from_name", "")
+                    await send_email_smtp(
+                        from_address=from_address,
                         to_address=user.email,
                         message=message,
                         subject=subject,
-                        send_email_api=settings.send_email_api,
+                        from_name=from_name,
                     )
-
-                    if success:
-                        logger.info(
-                            f"Successfully sent ACL notification email to {user.email} for ticket {ticket.shortname}"
-                        )
-                    else:
-                        logger.warning(
-                            f"Failed to send ACL notification email to {user.email} for ticket {ticket.shortname}"
-                        )
 
                 except Exception as e:
                     logger.error(
